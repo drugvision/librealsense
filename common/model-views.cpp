@@ -39,6 +39,12 @@
 #include <regex>
 #include <cmath>
 
+#if ELPP_OS_UNIX
+#   include <sys/stat.h>
+#elif ELPP_OS_WINDOWS
+#   include <direct.h>
+#endif
+
 #include "opengl3.h"
 
 using namespace rs400;
@@ -3241,6 +3247,47 @@ namespace rs2
 
         ImGui::PopStyleColor(5);
     }
+    
+    void me_mkdir(char * path)
+    {
+#if ELPP_OS_UNIX
+        mkdir(path, ELPP_LOG_PERMS);
+#elif ELPP_OS_WINDOWS
+        _mkdir(path);
+#endif
+    }
+
+    std::string __get_date_name()
+    {
+        std::time_t now = std::time(NULL);
+        std::tm * ptm = std::localtime(&now);
+        char buffer[9];
+        // Format: 20230317
+        std::strftime(buffer, 9, "%Y%m%d", ptm);
+        return buffer;
+    }
+
+    void stream_model::save_snapshot_frame(viewer_model& viewer) const
+    {
+        // Snapshot the color-augmented version of the frame
+        if (auto colorized_frame = texture->get_last_frame(true).as<video_frame>())
+        {
+            std::string folder_name = "dataset-" + __get_date_name();
+            std::string filename = rs2::get_timestamped_file_name() + ".jpg";
+            std::string path = folder_name + "/" + filename;
+            
+            me_mkdir((char *)folder_name.c_str());
+            
+            save_to_jpg(path.data(), colorized_frame.get_width(), colorized_frame.get_height(), colorized_frame.get_bytes_per_pixel(), colorized_frame.get_data(), 98);
+            
+            std::stringstream ss;
+            ss << "JPG snapshot was saved to " << filename << std::endl;
+            
+            viewer.not_model->add_notification(notification_data{
+                ss.str().c_str(), RS2_LOG_SEVERITY_INFO, RS2_NOTIFICATION_CATEGORY_HARDWARE_EVENT
+            });
+        }
+    }
 
     void stream_model::snapshot_frame(const char* filename, viewer_model& viewer) const
     {
@@ -4939,46 +4986,29 @@ namespace rs2
         {
             return sm->streaming;
         });
-        textual_icon button_icon = is_recording ? textual_icons::stop : textual_icons::circle;
+        textual_icon button_icon = textual_icons::camera;
         const float icons_width = 78.0f;
         const ImVec2 device_panel_icons_size{ icons_width, 25 };
         std::string recorod_button_name = to_string() << button_icon << "##" << id;
-        auto record_button_color = is_recording ? light_blue : light_grey;
+        auto record_button_color = light_grey;
         ImGui::PushStyleColor(ImGuiCol_Text, record_button_color);
         ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, record_button_color);
         if (ImGui::ButtonEx(recorod_button_name.c_str(), device_panel_icons_size, (!is_streaming || is_playback_device) ? ImGuiButtonFlags_Disabled : 0))
         {
-            if (is_recording) //is_recording is changed inside stop/start_recording
-            {
-                stop_recording(viewer);
-            }
-            else
-            {
-                int recording_setting = config_file::instance().get(configurations::record::file_save_mode);
-                std::string path = "";
-                std::string default_path = config_file::instance().get(configurations::record::default_path);
-                if (!ends_with(default_path, "/") && !ends_with(default_path, "\\")) default_path += "/";
-                std::string default_filename = rs2::get_timestamped_file_name() + ".bag";
-                if (recording_setting == 0 && default_path.size() > 1 )
-                {
-                    path = default_path + default_filename;
+            for (auto &st : viewer.streams) {
+                bool is_rgb_camera = st.second.dev->s->is<color_sensor>();
+                std::stringstream msg;
+                msg << "device is " << (is_rgb_camera ? "RGB" : "DEP");
+                viewer.not_model->add_log(msg.str());
+                
+                if (is_rgb_camera) {
+                    st.second.save_snapshot_frame(viewer);
                 }
-                else
-                {
-                    if (const char* ret = file_dialog_open(file_dialog_mode::save_file, "ROS-bag\0*.bag\0",
-                        default_path.c_str(), default_filename.c_str()))
-                    {
-                        path = ret;
-                        if (!ends_with(utilities::string::to_lower(path), ".bag")) path += ".bag";
-                    }
-                }
-
-                if (path != "") start_recording(path, error_message);
             }
         }
         if (ImGui::IsItemHovered())
         {
-            std::string record_button_hover_text = (!is_streaming ? "Start streaming to enable recording" : (is_recording ? "Stop Recording" : "Start Recording"));
+            std::string record_button_hover_text = (!is_streaming ? "Start streaming to enable snapshot" : "Save Sanpshot");
             ImGui::SetTooltip("%s", record_button_hover_text.c_str());
             if (is_streaming) window.link_hovered();
         }
@@ -5559,7 +5589,7 @@ namespace rs2
 
         ImGui::PushStyleColor(ImGuiCol_Text, record_button_color);
         ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, record_button_color);
-        ImGui::ButtonEx(is_recording ? "Stop" : "Record", device_panel_icons_size, (!is_streaming ? ImGuiButtonFlags_Disabled : 0));
+        ImGui::ButtonEx("Snapshot", device_panel_icons_size, (!is_streaming ? ImGuiButtonFlags_Disabled : 0));
         if (ImGui::IsItemHovered() && is_streaming) window.link_hovered();
         ImGui::PopStyleColor(2);
 

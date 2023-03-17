@@ -223,6 +223,13 @@ Some auxillary functionalities might be affected. Please report this message if 
         return stbi_write_png(filename, (int)pixel_width, (int)pixels_height, (int)bytes_per_pixel, raster_data, (int)stride_bytes);
     }
 
+    int save_to_jpg(const char* filename,
+        size_t pixel_width, size_t pixels_height, size_t bytes_per_pixel,
+        const void* raster_data, int quality)
+    {
+        return stbi_write_jpg(filename, (int)pixel_width, (int)pixels_height, (int)bytes_per_pixel, raster_data, quality);
+    }
+
     std::string get_file_name(const std::string& path)
     {
         std::string file_name;
